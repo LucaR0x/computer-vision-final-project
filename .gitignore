@@ -1,0 +1,39 @@
+# Build
+build/
+cmake-build-*/
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# C++
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.exe
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Dataset
+data/*
+!data/README.md
+
+# Models
+models/*
+!models/README.md
+
+# Results
+results/*
+!results/README.md
+
+# Environment
+.env
