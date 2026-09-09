@@ -71,7 +71,7 @@ void ActionClassifier::evaluate(const std::vector<FeatureSample>& dataset, float
         std::shuffle(class_buckets[c].begin(), class_buckets[c].end(), g);
     }
 
-    const int K_FOLDS = 4;
+    const int K_FOLDS = 6;
     int global_confusion_matrix[6][6] = {0};
     int total_evaluated = 0;
     int total_correct = 0;
@@ -138,7 +138,7 @@ void ActionClassifier::evaluate(const std::vector<FeatureSample>& dataset, float
     }
 
     float accuracy = (static_cast<float>(total_correct) / total_evaluated) * 100.0f;
-    std::cout << "\n================ 4-FOLD CV EVALUATION METRICS ================\n";
+    std::cout << "\n================ 6-FOLD CV EVALUATION METRICS ================\n";
     std::cout << "Total Evaluated Sequences: " << total_evaluated << " / 72\n";
     std::cout << "Mean Cross-Validation Accuracy: " << std::fixed << std::setprecision(2) << accuracy << "%\n\n";
 

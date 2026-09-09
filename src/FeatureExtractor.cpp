@@ -112,79 +112,27 @@ FeatureSample FeatureExtractor::extractFromSequence(const std::vector<cv::Mat>& 
 
     float actor_height = static_cast<float>(ref_roi.height > 15 ? ref_roi.height : img_h * 0.5f);
 
-    // Track bounding box center using float precision across frames
+    // Track bounding box center across frames using sequence tracker
+    Tracker seq_tracker;
+    seq_tracker.init(frames);
+
     std::vector<cv::Point2f> centers(total_frames);
     std::vector<cv::Rect> tracked_boxes(total_frames);
     std::vector<bool> actor_present(total_frames, false);
 
-    centers[mid_t] = cv::Point2f(ref_roi.x + ref_roi.width / 2.0f, ref_roi.y + ref_roi.height / 2.0f);
-    tracked_boxes[mid_t] = ref_roi;
-    actor_present[mid_t] = true;
+    for (int t = 0; t < total_frames; ++t) {
+        cv::Mat mask_t;
+        cv::Rect b_t = seq_tracker.processFrame(frames[t], mask_t);
 
-    // Helper lambda to propagate bounding box tracking with optical flow
-    auto propagate_step = [&](int src_t, int dst_t) -> cv::Point2f {
-        cv::Mat g_src, g_dst;
-        if (frames[src_t].channels() == 3) {
-            cv::cvtColor(frames[src_t], g_src, cv::COLOR_BGR2GRAY);
+        if (b_t.width > 5 && b_t.height > 5) {
+            tracked_boxes[t] = b_t;
+            centers[t] = cv::Point2f(b_t.x + b_t.width / 2.0f, b_t.y + b_t.height / 2.0f);
+            actor_present[t] = true;
         } else {
-            g_src = frames[src_t];
+            tracked_boxes[t] = ref_roi;
+            centers[t] = cv::Point2f(ref_roi.x + ref_roi.width / 2.0f, ref_roi.y + ref_roi.height / 2.0f);
+            actor_present[t] = false;
         }
-
-        if (frames[dst_t].channels() == 3) {
-            cv::cvtColor(frames[dst_t], g_dst, cv::COLOR_BGR2GRAY);
-        } else {
-            g_dst = frames[dst_t];
-        }
-
-        cv::Mat flow;
-        cv::calcOpticalFlowFarneback(g_src, g_dst, flow, 0.5, 4, 15, 3, 5, 1.2, 0);
-
-        cv::Rect src_box = tracked_boxes[src_t] & cv::Rect(0, 0, img_w, img_h);
-        float dx = 0.0f, dy = 0.0f;
-
-        if (src_box.width > 5 && src_box.height > 5) {
-            cv::Mat flow_roi = flow(src_box);
-            cv::Mat flow_ch[2];
-            cv::split(flow_roi, flow_ch);
-            cv::Mat mag;
-            cv::magnitude(flow_ch[0], flow_ch[1], mag);
-
-            cv::Mat motion_mask = mag > 0.3f;
-            if (cv::countNonZero(motion_mask) > 5) {
-                dx = static_cast<float>(cv::mean(flow_ch[0], motion_mask)[0]);
-                dy = static_cast<float>(cv::mean(flow_ch[1], motion_mask)[0]);
-            } else {
-                cv::Scalar m_flow = cv::mean(flow_roi);
-                dx = static_cast<float>(m_flow[0]);
-                dy = static_cast<float>(m_flow[1]);
-            }
-        }
-
-        return cv::Point2f(centers[src_t].x + dx, centers[src_t].y + dy);
-    };
-
-    // Backward tracking
-    for (int t = mid_t - 1; t >= 0; --t) {
-        centers[t] = propagate_step(t + 1, t);
-        int bx = static_cast<int>(std::round(centers[t].x - ref_roi.width / 2.0f));
-        int by = static_cast<int>(std::round(centers[t].y - ref_roi.height / 2.0f));
-        tracked_boxes[t] = cv::Rect(bx, by, ref_roi.width, ref_roi.height);
-
-        cv::Rect inter = tracked_boxes[t] & cv::Rect(0, 0, img_w, img_h);
-        actor_present[t] = (inter.area() > 0.4f * ref_roi.area() &&
-                            centers[t].x > 5.0f && centers[t].x < img_w - 5.0f);
-    }
-
-    // Forward tracking
-    for (int t = mid_t + 1; t < total_frames; ++t) {
-        centers[t] = propagate_step(t - 1, t);
-        int bx = static_cast<int>(std::round(centers[t].x - ref_roi.width / 2.0f));
-        int by = static_cast<int>(std::round(centers[t].y - ref_roi.height / 2.0f));
-        tracked_boxes[t] = cv::Rect(bx, by, ref_roi.width, ref_roi.height);
-
-        cv::Rect inter = tracked_boxes[t] & cv::Rect(0, 0, img_w, img_h);
-        actor_present[t] = (inter.area() > 0.4f * ref_roi.area() &&
-                            centers[t].x > 5.0f && centers[t].x < img_w - 5.0f);
     }
 
     // Feature vectors over time
@@ -321,7 +269,21 @@ FeatureSample FeatureExtractor::extractFromSequence(const std::vector<cv::Mat>& 
     // --- Compute aggregated feature metrics ---
     float active_ratio = static_cast<float>(active_count) / static_cast<float>(total_frames);
 
-    // 1-4: Translational speed metrics (Key for Walking vs Jogging vs Running!)
+    // 1-4: Net sequence displacement & translation speed metrics (Key for Walking vs Jogging vs Running!)
+    int first_active = -1, last_active = -1;
+    for (int t = 0; t < total_frames; ++t) {
+        if (actor_present[t]) {
+            if (first_active == -1) first_active = t;
+            last_active = t;
+        }
+    }
+    float total_displacement = 0.0f;
+    if (first_active != -1 && last_active > first_active) {
+        float dx_net = std::abs(centers[last_active].x - centers[first_active].x);
+        int duration = (last_active - first_active);
+        total_displacement = (dx_net / (actor_height + 1e-4f)) / static_cast<float>(duration);
+    }
+
     float mean_trans_speed = computeVectorMean(frame_trans_speeds);
     float max_trans_speed  = computeVectorMax(frame_trans_speeds);
     float mean_body_p80    = computeVectorMean(body_flow_p80s);
@@ -353,7 +315,7 @@ FeatureSample FeatureExtractor::extractFromSequence(const std::vector<cv::Mat>& 
     float max_aspect_ratio = computeVectorMax(aspect_ratios);
 
     // Build 18-element feature vector
-    sample.descriptors.push_back(mean_trans_speed);                         // 1. Mean translation speed
+    sample.descriptors.push_back(total_displacement);                       // 1. Total net sequence horizontal displacement
     sample.descriptors.push_back(max_trans_speed);                          // 2. Max translation speed
     sample.descriptors.push_back(mean_body_p80);                            // 3. Mean body 85th percentile flow speed
     sample.descriptors.push_back(max_body_p80);                             // 4. Max body 85th percentile flow speed

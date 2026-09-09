@@ -37,3 +37,6 @@ results/*
 
 # Environment
 .env
+
+# Output
+output/

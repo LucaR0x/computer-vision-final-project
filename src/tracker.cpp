@@ -1,8 +1,43 @@
 #include "tracker.hpp"
+#include <opencv2/imgproc.hpp>
+#include <numeric>
+#include <algorithm>
+#include <cmath>
 
 Tracker::Tracker() {
-    bg_subtractor = cv::createBackgroundSubtractorKNN(100, 400.0, false);
+    bg_subtractor = cv::createBackgroundSubtractorKNN(200, 400.0, false);
     first_frame = true;
+    bg_initialized = false;
+    prev_bbox = cv::Rect(0, 0, 0, 0);
+}
+
+void Tracker::init(const std::vector<cv::Mat>& sequence_frames) {
+    if (sequence_frames.empty()) return;
+
+    int h = sequence_frames[0].rows;
+    int w = sequence_frames[0].cols;
+    size_t num_frames = sequence_frames.size();
+
+    bg_median = cv::Mat::zeros(h, w, CV_8UC1);
+    std::vector<uchar> pixel_vals(num_frames);
+
+    for (int r = 0; r < h; ++r) {
+        for (int c = 0; c < w; ++c) {
+            for (size_t i = 0; i < num_frames; ++i) {
+                cv::Mat g;
+                if (sequence_frames[i].channels() == 3) {
+                    cv::cvtColor(sequence_frames[i], g, cv::COLOR_BGR2GRAY);
+                } else {
+                    g = sequence_frames[i];
+                }
+                pixel_vals[i] = g.at<uchar>(r, c);
+            }
+            std::nth_element(pixel_vals.begin(), pixel_vals.begin() + num_frames / 2, pixel_vals.end());
+            bg_median.at<uchar>(r, c) = pixel_vals[num_frames / 2];
+        }
+    }
+
+    bg_initialized = true;
 }
 
 cv::Rect Tracker::processFrame(const cv::Mat& frame, cv::Mat& out_mask) {
@@ -10,66 +45,81 @@ cv::Rect Tracker::processFrame(const cv::Mat& frame, cv::Mat& out_mask) {
     if (frame.channels() == 3) {
         cv::cvtColor(frame, gray, cv::COLOR_BGR2GRAY);
     } else {
-        gray = frame;
+        gray = frame.clone();
     }
 
     int img_w = gray.cols;
     int img_h = gray.rows;
 
-    cv::Mat fg_mask;
-    double learning_rate = first_frame ? 0.3 : 0.001;
-    bg_subtractor->apply(gray, fg_mask, learning_rate);
+    cv::Mat fg;
+    if (bg_initialized && !bg_median.empty()) {
+        cv::Mat diff;
+        cv::absdiff(gray, bg_median, diff);
+        cv::GaussianBlur(diff, diff, cv::Size(5, 5), 1.0);
+        cv::threshold(diff, fg, 18, 255, cv::THRESH_BINARY);
+    } else {
+        cv::Mat fg_knn;
+        double learning_rate = first_frame ? 0.5 : 0.0002;
+        bg_subtractor->apply(gray, fg_knn, learning_rate);
+        cv::threshold(fg_knn, fg, 150, 255, cv::THRESH_BINARY);
+    }
 
-    // Threshold shadows
-    cv::threshold(fg_mask, fg_mask, 180, 255, cv::THRESH_BINARY);
+    // Suppress border noise
+    cv::rectangle(fg, cv::Rect(0, 0, img_w, img_h), cv::Scalar(0), 6);
 
-    // Filter out edge noise around image border
-    cv::rectangle(fg_mask, cv::Rect(0, 0, img_w, img_h), cv::Scalar(0), 4);
-
-    // Morphological open & close to isolate human body silhouette
-    cv::Mat kernel_open = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(3, 3));
-    cv::Mat kernel_close = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(7, 15));
-    
-    cv::morphologyEx(fg_mask, out_mask, cv::MORPH_OPEN, kernel_open);
-    cv::morphologyEx(out_mask, out_mask, cv::MORPH_CLOSE, kernel_close);
+    // Morphological closing with vertical kernel to bridge head-torso-legs
+    cv::Mat kernel_close = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(11, 25));
+    cv::morphologyEx(fg, out_mask, cv::MORPH_CLOSE, kernel_close);
+    cv::dilate(out_mask, out_mask, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 9)));
 
     std::vector<std::vector<cv::Point>> contours;
     cv::findContours(out_mask, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
 
-    cv::Rect current_bbox(0, 0, 0, 0);
-    double max_area = 0;
+    cv::Rect main_bbox(0, 0, 0, 0);
+    double max_area = 0.0;
 
-    // Find largest valid human contour
-    for (const auto& contour : contours) {
-        double area = cv::contourArea(contour);
-        cv::Rect b = cv::boundingRect(contour);
-        // Exclude full-frame edge noise
+    for (const auto& c : contours) {
+        double area = cv::contourArea(c);
+        cv::Rect b = cv::boundingRect(c);
         if (b.width > img_w * 0.85 || b.height > img_h * 0.85) continue;
 
-        if (area > max_area && area > 60.0) {
+        if (area > max_area) {
             max_area = area;
-            current_bbox = b;
+            main_bbox = b;
         }
     }
 
-    if (current_bbox.area() > 0) {
-        if (first_frame) {
-            prev_bbox = current_bbox;
-            first_frame = false;
-        } else {
-            // Adaptive smoothing: higher alpha (0.8) to prevent lag during fast motion
-            float alpha = 0.8f;
-            int new_x = static_cast<int>(std::round(current_bbox.x * alpha + prev_bbox.x * (1.0f - alpha)));
-            int new_y = static_cast<int>(std::round(current_bbox.y * alpha + prev_bbox.y * (1.0f - alpha)));
-            int new_w = static_cast<int>(std::round(current_bbox.width * alpha + prev_bbox.width * (1.0f - alpha)));
-            int new_h = static_cast<int>(std::round(current_bbox.height * alpha + prev_bbox.height * (1.0f - alpha)));
+    cv::Rect bbox = main_bbox;
+    if (bbox.area() > 0) {
+        for (const auto& c : contours) {
+            double area = cv::contourArea(c);
+            if (area < 25.0) continue;
+            cv::Rect b = cv::boundingRect(c);
+            if (b == main_bbox) continue;
+            if (b.width > img_w * 0.85 || b.height > img_h * 0.85) continue;
 
-            current_bbox = cv::Rect(new_x, new_y, new_w, new_h);
-            prev_bbox = current_bbox;
+            int dist_x = std::max(0, std::max(main_bbox.x - (b.x + b.width), b.x - (main_bbox.x + main_bbox.width)));
+            int dist_y = std::max(0, std::max(main_bbox.y - (b.y + b.height), b.y - (main_bbox.y + main_bbox.height)));
+            if (dist_x < 20 && dist_y < 20) {
+                bbox |= b;
+            }
         }
-    } else {
-        current_bbox = prev_bbox;
     }
 
-    return current_bbox;
+    if (bbox.area() > 0) {
+        // Enforce human physical proportions (height/width ratio ~ 1.8 - 2.8)
+        float aspect = static_cast<float>(bbox.height) / static_cast<float>(bbox.width + 1e-4f);
+        if (aspect < 1.4f) {
+            int target_h = static_cast<int>(bbox.width * 2.0f);
+            target_h = std::min(target_h, static_cast<int>(img_h * 0.65f));
+            if (target_h > bbox.height) {
+                int pad_y = (target_h - bbox.height) / 2;
+                bbox.y = std::max(0, bbox.y - pad_y);
+                bbox.height = std::min(img_h - bbox.y, target_h);
+            }
+        }
+    }
+
+    first_frame = false;
+    return bbox;
 }

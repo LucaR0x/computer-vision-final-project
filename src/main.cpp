@@ -46,6 +46,7 @@ int main(int argc, char** argv) {
 
     std::vector<FeatureSample> feature_dataset;
     std::vector<float> iou_scores;
+    std::vector<cv::Rect> pred_bboxes;
     const int MEDIAN_FRAME_IDX = 19; // 20th frame (0-indexed 19)
 
     FeatureExtractor extractor;
@@ -53,6 +54,7 @@ int main(int argc, char** argv) {
     for (size_t s = 0; s < raw_dataset.size(); ++s) {
         const auto& seq = raw_dataset[s];
         Tracker tracker;
+        tracker.init(seq.frames);
         cv::Rect pred_median_bbox(0, 0, 0, 0);
 
         for (size_t f = 0; f < seq.frames.size(); ++f) {
@@ -69,6 +71,8 @@ int main(int argc, char** argv) {
             pred_median_bbox = seq.median_bbox;
         }
 
+        pred_bboxes.push_back(pred_median_bbox);
+
         // Calculate IoU with Ground Truth median bbox
         float iou = computeIoU(pred_median_bbox, seq.median_bbox);
         iou_scores.push_back(iou);
@@ -81,12 +85,28 @@ int main(int argc, char** argv) {
         feature_dataset.push_back(sample);
     }
 
-    // Compute Mean IoU (mIoU)
+    // Compute Mean IoU (mIoU) per class and overall
     float sum_iou = 0.0f;
-    for (float iou : iou_scores) sum_iou += iou;
+    std::vector<float> class_iou_sums(6, 0.0f);
+    std::vector<int> class_iou_counts(6, 0);
+
+    for (size_t i = 0; i < raw_dataset.size(); ++i) {
+        int lbl = raw_dataset[i].class_label;
+        if (lbl >= 1 && lbl <= 6) {
+            class_iou_sums[lbl - 1] += iou_scores[i];
+            class_iou_counts[lbl - 1]++;
+        }
+        sum_iou += iou_scores[i];
+    }
     float mIoU = (iou_scores.empty()) ? 0.0f : (sum_iou / iou_scores.size());
 
+    const std::string class_names_arr[6] = {"Boxing", "Clapping", "Waving", "Jogging", "Running", "Walking"};
     std::cout << "Mean Intersection over Union (mIoU): " << std::fixed << std::setprecision(4) << mIoU << "\n";
+    std::cout << "Per-class mIoU breakdown:\n";
+    for (int c = 0; c < 6; ++c) {
+        float c_miou = (class_iou_counts[c] > 0) ? (class_iou_sums[c] / class_iou_counts[c]) : 0.0f;
+        std::cout << "  - " << std::setw(10) << class_names_arr[c] << ": " << std::setprecision(4) << c_miou << "\n";
+    }
     std::cout << "===================================================================\n\n";
 
     std::cout << "================ MEMBER 2: CLASSIFICATION & EVALUATION ================\n";
@@ -96,6 +116,42 @@ int main(int argc, char** argv) {
     std::string model_path = output_dir + "/svm_action_model.xml";
     std::cout << "[INFO] Training final SVM model on complete dataset..." << std::endl;
     classifier.trainAndSave(feature_dataset, model_path);
+
+    // Save bounding box visual outputs for all 72 sequences
+    std::string viz_dir = output_dir + "/visualizations";
+    if (!fs::exists(viz_dir)) {
+        fs::create_directories(viz_dir);
+    }
+
+    std::cout << "\n[INFO] Saving bounding box visualization images to: " << viz_dir << std::endl;
+    for (size_t s = 0; s < raw_dataset.size(); ++s) {
+        const auto& seq = raw_dataset[s];
+        int pred_class = classifier.predict(feature_dataset[s].descriptors);
+        int gt_class = seq.class_label;
+
+        cv::Mat viz_img;
+        if (seq.frames[MEDIAN_FRAME_IDX].channels() == 1) {
+            cv::cvtColor(seq.frames[MEDIAN_FRAME_IDX], viz_img, cv::COLOR_GRAY2BGR);
+        } else {
+            viz_img = seq.frames[MEDIAN_FRAME_IDX].clone();
+        }
+
+        // Draw Ground Truth bounding box in BLUE
+        cv::rectangle(viz_img, seq.median_bbox, cv::Scalar(255, 0, 0), 2);
+
+        // Draw Predicted bounding box from Member 1 Tracker in GREEN
+        cv::rectangle(viz_img, pred_bboxes[s], cv::Scalar(0, 255, 0), 2);
+
+        std::string gt_str = (gt_class >= 1 && gt_class <= 6) ? class_names_arr[gt_class - 1] : "Unknown";
+        std::string pred_str = (pred_class >= 1 && pred_class <= 6) ? class_names_arr[pred_class - 1] : "Unknown";
+
+        std::string text_line = "GT:" + gt_str + " | PRED:" + pred_str + " | IoU:" + std::to_string(iou_scores[s]).substr(0, 4);
+        cv::putText(viz_img, text_line, cv::Point(5, 12), cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(0, 255, 255), 1);
+
+        std::string out_path = viz_dir + "/" + seq.sequence_name + ".png";
+        cv::imwrite(out_path, viz_img);
+    }
+    std::cout << "[INFO] Saved 72 visualization images into " << viz_dir << std::endl;
     std::cout << "=======================================================================\n";
 
     return 0;
