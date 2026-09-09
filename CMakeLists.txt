@@ -1,19 +1,24 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(COMPUTERVISION-FINALPROJECT26)
+project(COMPUTERVISION-FINALPROJECT)
 
 set(CMAKE_CXX_STANDARD 17)
 
 find_package(OpenCV REQUIRED)
 
-file(GLOB SRC_FILES src/*.cpp)
-
-add_executable(main ${SRC_FILES})
+add_executable(main 
+    src/main.cpp
+    src/DatasetLoader.cpp
+    src/FeatureExtractor.cpp
+    src/Classifier.cpp
+    src/tracker.cpp
+)
 
 # Include path
 target_include_directories(main
     PRIVATE
         ${PROJECT_SOURCE_DIR}/include
+        ${OpenCV_INCLUDE_DIRS}
 )
 
 # Link OpenCV
