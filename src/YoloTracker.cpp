@@ -94,30 +94,66 @@ cv::Rect YoloTracker::processFrame(const cv::Mat& frame, cv::Mat& out_mask) {
         int idx = indices[0]; 
         best_bbox = boxes[idx];
         
-        best_bbox &= cv::Rect(0, 0, img_w, img_h);
-        
         const auto& kpts = keypoints_list[idx];
         if (kpts.size() >= 3) {
-            // Convertiamo i Point2f in Point (interi) PRIMA del convexHull
             std::vector<cv::Point> kpts_int;
+            int min_x = img_w, min_y = img_h, max_x = 0, max_y = 0;
+            
             for (const auto& pt : kpts) {
-                kpts_int.push_back(cv::Point(static_cast<int>(pt.x), static_cast<int>(pt.y)));
+                int px = static_cast<int>(pt.x);
+                int py = static_cast<int>(pt.y);
+                kpts_int.push_back(cv::Point(px, py));
+                
+                // Troviamo le estremità assolute dei keypoint
+                if (px < min_x) min_x = px;
+                if (py < min_y) min_y = py;
+                if (px > max_x) max_x = px;
+                if (py > max_y) max_y = py;
             }
+            
+            // 1. ESPANSIONE KEYPOINTS: Forza il bounding box a includere sempre polsi e caviglie
+            cv::Rect kpt_rect(min_x, min_y, max_x - min_x, max_y - min_y);
+            best_bbox |= kpt_rect; // Unione matematica dei due rettangoli
 
+            // Creazione maschera Convex Hull
             std::vector<cv::Point> hull;
             cv::convexHull(kpts_int, hull);
-            
-            // Disegniamo il poligono pieno
             cv::fillConvexPoly(out_mask, hull, cv::Scalar(255));
-            
-            cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(15, 15));
+            cv::Mat kernel = cv::getStructuringElement(cv::MORPH_ELLIPSE, cv::Size(19, 19));
             cv::dilate(out_mask, out_mask, kernel);
         } else {
             cv::rectangle(out_mask, best_bbox, cv::Scalar(255), cv::FILLED);
         }
 
-        prev_bbox = best_bbox;
-    }
+        // 2. DYNAMIC PADDING
+        int pad_x = static_cast<int>(best_bbox.width * 0.06);
+        int pad_y = static_cast<int>(best_bbox.height * 0.02);
+        best_bbox.x = std::max(0, best_bbox.x - pad_x);
+        best_bbox.y = std::max(0, best_bbox.y - pad_y);
+        best_bbox.width = std::min(img_w - best_bbox.x, best_bbox.width + 2 * pad_x);
+        best_bbox.height = std::min(img_h - best_bbox.y, best_bbox.height + 2 * pad_y);
+        
+        // Assicuriamoci che non esca dai bordi dopo il padding
+        best_bbox &= cv::Rect(0, 0, img_w, img_h);
 
+        // 3. EMA SMOOTHING (Anti-Jitter)
+        if (first_frame) {
+            prev_bbox = best_bbox;
+            first_frame = false;
+        } else {
+            // Un alpha alto (0.80) mantiene il box fluido tra i frame consecutivi
+            float alpha = 0.80f; 
+            int new_x = static_cast<int>(std::round(best_bbox.x * alpha + prev_bbox.x * (1.0f - alpha)));
+            int new_y = static_cast<int>(std::round(best_bbox.y * alpha + prev_bbox.y * (1.0f - alpha)));
+            int new_w = static_cast<int>(std::round(best_bbox.width * alpha + prev_bbox.width * (1.0f - alpha)));
+            int new_h = static_cast<int>(std::round(best_bbox.height * alpha + prev_bbox.height * (1.0f - alpha)));
+
+            best_bbox = cv::Rect(new_x, new_y, new_w, new_h);
+            prev_bbox = best_bbox;
+        }
+    } else {
+        // Fallback: se YOLO non vede nulla per colpa del motion blur, usiamo la posizione precedente
+        best_bbox = prev_bbox;
+    }
     return best_bbox;
 }
