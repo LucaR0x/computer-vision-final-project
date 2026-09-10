@@ -106,8 +106,8 @@ void ActionClassifier::evaluate(const std::vector<FeatureSample>& dataset, float
         fold_svm->setType(cv::ml::SVM::C_SVC);
         fold_svm->setKernel(cv::ml::SVM::RBF);
 
-        cv::ml::ParamGrid c_grid(0.1, 100, 10);
-        cv::ml::ParamGrid gamma_grid(0.001, 1.0, 5);
+        cv::ml::ParamGrid c_grid(0.1, 500, 2);
+        cv::ml::ParamGrid gamma_grid(0.0001, 2.0, 2);
 
         fold_svm->trainAuto(cv::ml::TrainData::create(train_X, cv::ml::ROW_SAMPLE, train_y),
                              10, c_grid, gamma_grid,
