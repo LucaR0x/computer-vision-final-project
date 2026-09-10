@@ -12,6 +12,7 @@ add_executable(main
     src/FeatureExtractor.cpp
     src/Classifier.cpp
     src/tracker.cpp
+    src/YoloTracker.cpp
 )
 
 # Include path

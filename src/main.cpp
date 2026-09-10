@@ -2,12 +2,14 @@
 #include "FeatureExtractor.hpp"
 #include "Classifier.hpp"
 #include "tracker.hpp"
+#include "YoloTracker.hpp"
 
 #include <iostream>
 #include <filesystem>
 #include <vector>
 #include <iomanip>
 #include <algorithm>
+#include <memory>
 
 namespace fs = std::filesystem;
 
@@ -24,9 +26,16 @@ static float computeIoU(const cv::Rect& a, const cv::Rect& b) {
 int main(int argc, char** argv) {
     std::string dataset_path = "../data";
     std::string output_dir = "../output";
+    bool use_yolo = false;
 
-    if (argc > 1) {
-        dataset_path = argv[1];
+    // Parse command line arguments
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--use-yolo") {
+            use_yolo = true;
+        } else if (arg.rfind("--", 0) != 0) { // If it doesn't start with "--", assume it's the dataset path
+            dataset_path = arg;
+        }
     }
 
     if (!fs::exists(output_dir)) {
@@ -42,7 +51,18 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "\n================ MEMBER 1: LOCALIZATION & TRACKING ================\n";
-    std::cout << "[INFO] Processing " << raw_dataset.size() << " sequences with Tracker (KNN Subtractor + Morph + EMA)...\n";
+    
+    // Instantiate YOLO Tracker only once outside the loop if requested
+    std::unique_ptr<YoloTracker> yolo_tracker = nullptr;
+    if (use_yolo) {
+        std::cout << "[INFO] Mode: DEEP LEARNING FALLBACK (YOLOv8 Pose)\n";
+        std::string model_path = "../models/yolov8n-pose.onnx";
+        yolo_tracker = std::make_unique<YoloTracker>(model_path);
+    } else {
+        std::cout << "[INFO] Mode: CLASSICAL COMPUTER VISION (KNN Subtractor + Morph)\n";
+    }
+
+    std::cout << "[INFO] Processing " << raw_dataset.size() << " sequences...\n";
 
     std::vector<FeatureSample> feature_dataset;
     std::vector<float> iou_scores;
@@ -53,13 +73,28 @@ int main(int argc, char** argv) {
 
     for (size_t s = 0; s < raw_dataset.size(); ++s) {
         const auto& seq = raw_dataset[s];
-        Tracker tracker;
-        tracker.init(seq.frames);
         cv::Rect pred_median_bbox(0, 0, 0, 0);
+        
+        std::unique_ptr<Tracker> std_tracker = nullptr;
+
+        // Initialize the correct tracker for this sequence
+        if (use_yolo) {
+            yolo_tracker->reset(); // Clean memory for the new sequence
+        } else {
+            std_tracker = std::make_unique<Tracker>();
+            std_tracker->init(seq.frames); // Initialize background median
+        }
 
         for (size_t f = 0; f < seq.frames.size(); ++f) {
             cv::Mat clean_mask;
-            cv::Rect bbox = tracker.processFrame(seq.frames[f], clean_mask);
+            cv::Rect bbox;
+            
+            // Process frame with the selected tracker
+            if (use_yolo) {
+                bbox = yolo_tracker->processFrame(seq.frames[f], clean_mask);
+            } else {
+                bbox = std_tracker->processFrame(seq.frames[f], clean_mask);
+            }
 
             if (static_cast<int>(f) == MEDIAN_FRAME_IDX) {
                 pred_median_bbox = bbox;
