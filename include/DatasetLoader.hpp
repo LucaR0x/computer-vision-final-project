@@ -1,14 +1,11 @@
 #ifndef DATASET_LOADER_HPP
 #define DATASET_LOADER_HPP
 
-#pragma once
-
-#include <opencv2/core.hpp>
-#include <opencv2/imgproc.hpp>
 #include <opencv2/opencv.hpp>
 #include <string>
 #include <vector>
 
+// Structure to store a single action sequence
 struct SequenceData {
     std::string sequence_name;
     int class_label;
@@ -18,11 +15,13 @@ struct SequenceData {
 
 class DatasetLoader {
 public:
-    static std::vector<SequenceData> loadDataset(const std::string& dataset_root_path);
+    // Load all KTH action sequences from dataset folder
+    static std::vector<SequenceData> loadDataset(const std::string& dataset_path);
 
 private:
-    static bool parseGroundTruth(const std::string& txt_path, int img_width, int img_height,
-                                int& out_label, cv::Rect& out_bbox);
+    // Parse ground truth txt annotation file
+    static bool parseGroundTruth(const std::string& txt_path, int img_w, int img_h,
+                                 int& label, cv::Rect& bbox);
 };
 
 #endif // DATASET_LOADER_HPP

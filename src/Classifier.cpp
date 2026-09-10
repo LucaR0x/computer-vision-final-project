@@ -13,8 +13,8 @@ ActionClassifier::ActionClassifier() {
 }
 
 void ActionClassifier::prepareMatrices(const std::vector<FeatureSample>& samples, cv::Mat& out_features, cv::Mat& out_labels) {
-    int num_samples = static_cast<int>(samples.size());
-    int num_features = static_cast<int>(samples[0].descriptors.size());
+    int num_samples = (int)samples.size();
+    int num_features = (int)samples[0].descriptors.size();
 
     out_features = cv::Mat(num_samples, num_features, CV_32F);
     out_labels = cv::Mat(num_samples, 1, CV_32S);
@@ -34,15 +34,16 @@ void ActionClassifier::computeScalingParams(const cv::Mat& data) {
     trained_stds.assign(cols, 0.0f);
 
     for (int j = 0; j < cols; ++j) {
-        float sum = 0.0f;
+        float sum_val = 0.0f;
         for (int i = 0; i < rows; ++i) {
-            sum += data.at<float>(i, j);
+            sum_val += data.at<float>(i, j);
         }
-        trained_means[j] = sum / rows;
+        trained_means[j] = sum_val / rows;
 
         float sq_diff = 0.0f;
         for (int i = 0; i < rows; ++i) {
-            sq_diff += std::pow(data.at<float>(i, j) - trained_means[j], 2.0f);
+            float d = data.at<float>(i, j) - trained_means[j];
+            sq_diff += d * d;
         }
         trained_stds[j] = std::sqrt(sq_diff / rows) + 1e-6f;
     }
@@ -60,24 +61,22 @@ void ActionClassifier::evaluate(const std::vector<FeatureSample>& dataset, float
     if (dataset.empty()) return;
 
     std::vector<FeatureSample> class_buckets[6];
-    for (const auto& s : dataset) {
-        if (s.label >= 1 && s.label <= 6) {
-            class_buckets[s.label - 1].push_back(s);
+    for (size_t i = 0; i < dataset.size(); ++i) {
+        int lbl = dataset[i].label;
+        if (lbl >= 1 && lbl <= 6) {
+            class_buckets[lbl - 1].push_back(dataset[i]);
         }
     }
 
-    std::mt19937 g(42);
+    std::mt19937 rng(42);
     for (int c = 0; c < 6; ++c) {
-        std::shuffle(class_buckets[c].begin(), class_buckets[c].end(), g);
+        std::shuffle(class_buckets[c].begin(), class_buckets[c].end(), rng);
     }
 
     const int K_FOLDS = 6;
-    int global_confusion_matrix[6][6] = {0};
-    int total_evaluated = 0;
+    int confusion_matrix[6][6] = {0};
+    int total_eval = 0;
     int total_correct = 0;
-
-    cv::ml::ParamGrid c_grid(0.1, 100, 10);
-    cv::ml::ParamGrid gamma_grid(0.001, 1.0, 5);
 
     const std::string class_names[6] = {"Boxing", "Clapping", "Waving", "Jogging", "Running", "Walking"};
 
@@ -85,11 +84,11 @@ void ActionClassifier::evaluate(const std::vector<FeatureSample>& dataset, float
         std::vector<FeatureSample> train_fold, test_fold;
 
         for (int c = 0; c < 6; ++c) {
-            int fold_size = static_cast<int>(class_buckets[c].size()) / K_FOLDS;
+            int fold_size = (int)class_buckets[c].size() / K_FOLDS;
             int start_idx = fold * fold_size;
             int end_idx = start_idx + fold_size;
 
-            for (int i = 0; i < static_cast<int>(class_buckets[c].size()); ++i) {
+            for (int i = 0; i < (int)class_buckets[c].size(); ++i) {
                 if (i >= start_idx && i < end_idx) test_fold.push_back(class_buckets[c][i]);
                 else train_fold.push_back(class_buckets[c][i]);
             }
@@ -119,27 +118,27 @@ void ActionClassifier::evaluate(const std::vector<FeatureSample>& dataset, float
                              true);
 
         for (int i = 0; i < test_X.rows; ++i) {
-            int pred = static_cast<int>(fold_svm->predict(test_X.row(i)));
-            int gt = test_y.at<int>(i, 0);
+            int pred_label = (int)fold_svm->predict(test_X.row(i));
+            int gt_label = test_y.at<int>(i, 0);
 
-            if (gt >= 1 && gt <= 6 && pred >= 1 && pred <= 6) {
-                global_confusion_matrix[gt - 1][pred - 1]++;
-                if (pred == gt) {
+            if (gt_label >= 1 && gt_label <= 6 && pred_label >= 1 && pred_label <= 6) {
+                confusion_matrix[gt_label - 1][pred_label - 1]++;
+                if (pred_label == gt_label) {
                     total_correct++;
                 } else {
                     std::cout << "[MISCLASS] Fold " << fold << " | Seq: " 
-                              << test_fold[i].sequence_name << " (GT: " << gt 
-                              << " " << class_names[gt - 1] << " -> Pred: " << pred 
-                              << " " << class_names[pred - 1] << ")\n";
+                              << test_fold[i].sequence_name << " (GT: " << gt_label 
+                              << " " << class_names[gt_label - 1] << " -> Pred: " << pred_label 
+                              << " " << class_names[pred_label - 1] << ")\n";
                 }
-                total_evaluated++;
+                total_eval++;
             }
         }
     }
 
-    float accuracy = (static_cast<float>(total_correct) / total_evaluated) * 100.0f;
+    float accuracy = ((float)total_correct / (float)total_eval) * 100.0f;
     std::cout << "\n================ 6-FOLD CV EVALUATION METRICS ================\n";
-    std::cout << "Total Evaluated Sequences: " << total_evaluated << " / 72\n";
+    std::cout << "Total Evaluated Sequences: " << total_eval << " / 72\n";
     std::cout << "Mean Cross-Validation Accuracy: " << std::fixed << std::setprecision(2) << accuracy << "%\n\n";
 
     std::cout << "Cumulative Confusion Matrix:\n";
@@ -147,30 +146,30 @@ void ActionClassifier::evaluate(const std::vector<FeatureSample>& dataset, float
     for (int r = 0; r < 6; ++r) {
         std::cout << "[" << (r + 1) << "]  ";
         for (int c = 0; c < 6; ++c) {
-            std::cout << std::setw(4) << global_confusion_matrix[r][c] << " ";
+            std::cout << std::setw(4) << confusion_matrix[r][c] << " ";
         }
         std::cout << "\n";
     }
 
     std::cout << "\nPer-Class Cumulative Metrics:\n";
     for (int c = 0; c < 6; ++c) {
-        int tp = global_confusion_matrix[c][c];
+        int tp = confusion_matrix[c][c];
         int fn = 0, fp = 0;
 
         for (int i = 0; i < 6; ++i) {
             if (i != c) {
-                fn += global_confusion_matrix[c][i];
-                fp += global_confusion_matrix[i][c];
+                fn += confusion_matrix[c][i];
+                fp += confusion_matrix[i][c];
             }
         }
 
-        float precision = (tp + fp > 0) ? static_cast<float>(tp) / (tp + fp) : 0.0f;
-        float recall = (tp + fn > 0) ? static_cast<float>(tp) / (tp + fn) : 0.0f;
-        float f1 = (precision + recall > 0) ? 2.0f * (precision * recall) / (precision + recall) : 0.0f;
+        float prec = (tp + fp > 0) ? (float)tp / (tp + fp) : 0.0f;
+        float rec  = (tp + fn > 0) ? (float)tp / (tp + fn) : 0.0f;
+        float f1   = (prec + rec > 0) ? 2.0f * (prec * rec) / (prec + rec) : 0.0f;
 
         std::cout << "Class " << (c + 1) << " (" << std::setw(9) << class_names[c] << ") -> "
-                  << "Prec: " << std::setprecision(2) << precision << " | "
-                  << "Rec: " << recall << " | "
+                  << "Prec: " << std::setprecision(2) << prec << " | "
+                  << "Rec: " << rec << " | "
                   << "F1: " << f1 << "\n";
     }
     std::cout << "==============================================================\n\n";
@@ -207,16 +206,16 @@ void ActionClassifier::trainAndSave(const std::vector<FeatureSample>& dataset, c
 
 int ActionClassifier::predict(const std::vector<float>& raw_feature_vector) const {
     if (trained_means.empty() || trained_stds.empty()) {
-        std::cerr << "[ERROR] Scaler params not initialized before predict!" << std::endl;
+        std::cerr << "[ERROR] Scaler params not initialized!" << std::endl;
         return -1;
     }
 
-    cv::Mat sample_mat(1, static_cast<int>(raw_feature_vector.size()), CV_32F);
+    cv::Mat sample_mat(1, (int)raw_feature_vector.size(), CV_32F);
     for (size_t j = 0; j < raw_feature_vector.size(); ++j) {
-        sample_mat.at<float>(0, static_cast<int>(j)) = (raw_feature_vector[j] - trained_means[j]) / trained_stds[j];
+        sample_mat.at<float>(0, (int)j) = (raw_feature_vector[j] - trained_means[j]) / trained_stds[j];
     }
 
-    return static_cast<int>(svm_model->predict(sample_mat));
+    return (int)svm_model->predict(sample_mat);
 }
 
 bool ActionClassifier::loadModel(const std::string& model_input_path) {
@@ -225,7 +224,7 @@ bool ActionClassifier::loadModel(const std::string& model_input_path) {
     std::string scale_path = model_input_path + ".scale.yaml";
     cv::FileStorage fs(scale_path, cv::FileStorage::READ);
     if (!fs.isOpened()) {
-        std::cerr << "[WARNING] Could not find scaling file: " << scale_path << std::endl;
+        std::cerr << "[WARNING] Scaling file missing: " << scale_path << std::endl;
         return !svm_model.empty();
     }
 
