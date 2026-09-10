@@ -28,8 +28,8 @@ data/*
 !data/README.md
 
 # Models
-models/*
-!models/README.md
+# models/*
+# !models/README.md
 
 # Results
 results/*
