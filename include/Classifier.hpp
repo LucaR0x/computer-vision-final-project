@@ -21,8 +21,8 @@ private:
 public:
     ActionClassifier();
 
-    // 6-Fold Stratified Cross Validation Evaluation
-    void evaluate(const std::vector<FeatureSample>& dataset, float train_ratio = 0.75f);
+    // 6-Fold Stratified Cross Validation Evaluation (returns mean CV accuracy percentage)
+    float evaluate(const std::vector<FeatureSample>& dataset, float train_ratio = 0.75f);
 
     // Train final model and save to xml file
     void trainAndSave(const std::vector<FeatureSample>& dataset, const std::string& model_output_path);

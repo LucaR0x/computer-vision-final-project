@@ -10,6 +10,7 @@ add_executable(main
     src/main.cpp
     src/DatasetLoader.cpp
     src/FeatureExtractor.cpp
+    src/YoloFeatureExtractor.cpp
     src/Classifier.cpp
     src/tracker.cpp
     src/YoloTracker.cpp

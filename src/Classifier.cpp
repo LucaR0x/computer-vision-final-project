@@ -57,8 +57,8 @@ void ActionClassifier::applyScaling(cv::Mat& data) const {
     }
 }
 
-void ActionClassifier::evaluate(const std::vector<FeatureSample>& dataset, float) {
-    if (dataset.empty()) return;
+float ActionClassifier::evaluate(const std::vector<FeatureSample>& dataset, float) {
+    if (dataset.empty()) return 0.0f;
 
     std::vector<FeatureSample> class_buckets[6];
     for (size_t i = 0; i < dataset.size(); ++i) {
@@ -173,6 +173,7 @@ void ActionClassifier::evaluate(const std::vector<FeatureSample>& dataset, float
                   << "F1: " << f1 << "\n";
     }
     std::cout << "==============================================================\n\n";
+    return accuracy;
 }
 
 void ActionClassifier::trainAndSave(const std::vector<FeatureSample>& dataset, const std::string& model_output_path) {
