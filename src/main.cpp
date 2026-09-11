@@ -46,6 +46,12 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
         fs::create_directories(output_dir);
     }
 
+    // Creazione della sottocartella dedicata ai video per questo metodo
+    std::string videos_dir = output_dir + "/videos";
+    if (!fs::exists(videos_dir)) {
+        fs::create_directories(videos_dir);
+    }
+
     std::cout << "\n===================================================================\n";
     std::cout << " PIPELINE: " << results.mode_name << "\n";
     std::cout << "===================================================================\n";
@@ -71,6 +77,8 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
     FeatureExtractor cv_extractor;
     YoloFeatureExtractor yolo_extractor;
 
+    const std::string class_names_arr[6] = {"Boxing", "Clapping", "Waving", "Jogging", "Running", "Walking"};
+
     for (size_t s = 0; s < raw_dataset.size(); ++s) {
         const auto& seq = raw_dataset[s];
         cv::Rect pred_median_bbox(0, 0, 0, 0);
@@ -84,6 +92,9 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
             std_tracker = std::make_unique<Tracker>();
             std_tracker->init(seq.frames);
         }
+
+        // Vettore temporaneo per memorizzare i frame annotati di questa sequenza
+        std::vector<cv::Mat> annotated_frames;
 
         for (size_t f = 0; f < seq.frames.size(); ++f) {
             cv::Mat clean_mask;
@@ -100,6 +111,22 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
             if (static_cast<int>(f) == MEDIAN_FRAME_IDX) {
                 pred_median_bbox = bbox;
             }
+
+            // Preparazione del frame con la BBox disegnata in VERDE per il video
+            cv::Mat frame_viz;
+            if (seq.frames[f].channels() == 1) {
+                cv::cvtColor(seq.frames[f], frame_viz, cv::COLOR_GRAY2BGR);
+            } else {
+                frame_viz = seq.frames[f].clone();
+            }
+
+            cv::rectangle(frame_viz, bbox, cv::Scalar(0, 255, 0), 2);
+            
+            std::string act_name = (seq.class_label >= 1 && seq.class_label <= 6) ? class_names_arr[seq.class_label - 1] : "";
+            std::string info_text = act_name + " | F:" + std::to_string(f);
+            cv::putText(frame_viz, info_text, cv::Point(5, 12), cv::FONT_HERSHEY_SIMPLEX, 0.35, cv::Scalar(0, 255, 255), 1);
+
+            annotated_frames.push_back(frame_viz);
         }
 
         if (pred_median_bbox.width <= 0 || pred_median_bbox.height <= 0) {
@@ -107,6 +134,22 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
         }
 
         pred_bboxes.push_back(pred_median_bbox);
+
+        // Salvataggio del video della sequenza corrente (es. 10 FPS per vederla fluida)
+        if (!annotated_frames.empty()) {
+            int frame_w = annotated_frames[0].cols;
+            int frame_h = annotated_frames[0].rows;
+            std::string video_path = videos_dir + "/" + seq.sequence_name + ".mp4";
+            
+            // Usiamo il codec mp4v (compatibile universalmente con i contenitori .mp4)
+            cv::VideoWriter writer(video_path, cv::VideoWriter::fourcc('m', 'p', '4', 'v'), 10.0, cv::Size(frame_w, frame_h), true);
+            if (writer.isOpened()) {
+                for (const auto& fr : annotated_frames) {
+                    writer.write(fr);
+                }
+                writer.release();
+            }
+        }
 
         float iou = computeIoU(pred_median_bbox, seq.median_bbox);
         iou_scores.push_back(iou);
@@ -142,7 +185,6 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
     results.mIoU = (iou_scores.empty()) ? 0.0f : (sum_iou / iou_scores.size());
 
     results.per_class_miou.resize(6, 0.0f);
-    const std::string class_names_arr[6] = {"Boxing", "Clapping", "Waving", "Jogging", "Running", "Walking"};
     std::cout << "Mean Intersection over Union (mIoU): " << std::fixed << std::setprecision(4) << results.mIoU << "\n";
     std::cout << "Per-class mIoU breakdown:\n";
     for (int c = 0; c < 6; ++c) {
@@ -160,7 +202,7 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
     std::cout << "Training final SVM model on complete dataset..." << std::endl;
     classifier.trainAndSave(feature_dataset, model_path);
 
-    // Save bounding box visual outputs for all 72 sequences
+    // Save bounding box visual outputs for all 72 sequences (immagini singole sul frame mediano)
     std::string viz_dir = output_dir + "/visualizations";
     if (!fs::exists(viz_dir)) {
         fs::create_directories(viz_dir);
@@ -201,8 +243,8 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
 }
 
 int main(int argc, char** argv) {
+    std::string base_output_dir = "../output";
     std::string dataset_path = "../data";
-    std::string output_dir = "../output";
     bool use_yolo = false;
     bool use_all = false;
 
@@ -216,10 +258,6 @@ int main(int argc, char** argv) {
         } else if (arg.rfind("--", 0) != 0) { // If it doesn't start with "--", assume dataset path
             dataset_path = arg;
         }
-    }
-
-    if (!fs::exists(output_dir)) {
-        fs::create_directories(output_dir);
     }
 
     std::cout << "Loading dataset from: " << dataset_path << std::endl;
@@ -236,8 +274,9 @@ int main(int argc, char** argv) {
         std::cout << "               RUNNING COMPLETE COMPARISON                 \n";
         std::cout << "=======================================================================\n";
 
-        PipelineResults cv_res = runPipeline(raw_dataset, false, output_dir + "/cv");
-        PipelineResults yolo_res = runPipeline(raw_dataset, true, output_dir + "/yolo");
+        // Cartelle rigorosamente separate
+        PipelineResults cv_res = runPipeline(raw_dataset, false, base_output_dir + "/cv");
+        PipelineResults yolo_res = runPipeline(raw_dataset, true, base_output_dir + "/yolo");
 
         const std::string class_names_arr[6] = {"Boxing", "Clapping", "Waving", "Jogging", "Running", "Walking"};
 
@@ -272,8 +311,9 @@ int main(int argc, char** argv) {
         std::cout << "================================================================================\n\n";
 
     } else {
-        // Run single pipeline (YOLO if --use-yolo, else Classical CV)
-        runPipeline(raw_dataset, use_yolo, output_dir);
+        // Assegna automaticamente la sottocartella corretta in base al flag scelto
+        std::string specific_output_dir = use_yolo ? (base_output_dir + "/yolo") : (base_output_dir + "/cv");
+        runPipeline(raw_dataset, use_yolo, specific_output_dir);
     }
 
     return 0;

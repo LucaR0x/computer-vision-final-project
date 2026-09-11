@@ -5,7 +5,7 @@ AUTHOR: ROSSETTO LUCA
 #include "tracker.hpp"
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc.hpp>
-#include <opencv2/geometry.hpp>
+//#include <opencv2/geometry.hpp>
 #include <opencv2/video.hpp>
 #include <numeric>
 #include <algorithm>
