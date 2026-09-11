@@ -1,3 +1,7 @@
+/**
+AUTHOR: CORTESE ALESSANDRO
+*/
+
 #include "FeatureExtractor.hpp"
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -6,6 +10,48 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+
+// Helper functions for statistical feature aggregation
+static float computeMean(const std::vector<float>& v) {
+    if (v.empty()) return 0.0f;
+    float s = 0.0f;
+    for (float x : v) s += x;
+    return s / v.size();
+}
+
+static float computeMax(const std::vector<float>& v) {
+    if (v.empty()) return 0.0f;
+    float m = v[0];
+    for (float x : v) if (x > m) m = x;
+    return m;
+}
+
+static float computeStdDev(const std::vector<float>& v) {
+    if (v.size() < 2) return 0.0f;
+    float m = computeMean(v);
+    float sq = 0.0f;
+    for (float x : v) sq += (x - m) * (x - m);
+    return std::sqrt(sq / v.size());
+}
+
+static int computeZeroCrossings(const std::vector<float>& v) {
+    if (v.size() < 3) return 0;
+    float m = computeMean(v);
+    int count = 0;
+    for (size_t i = 1; i < v.size(); ++i) {
+        float p = v[i - 1] - m;
+        float c = v[i] - m;
+        if ((p <= 0.0f && c > 0.0f) || (p >= 0.0f && c < 0.0f)) count++;
+    }
+    return count;
+}
+
+static float computePercentile(std::vector<float> v, float pct) {
+    if (v.empty()) return 0.0f;
+    int idx = (int)(std::clamp(pct, 0.0f, 1.0f) * (v.size() - 1));
+    std::nth_element(v.begin(), v.begin() + idx, v.end());
+    return v[idx];
+}
 
 FeatureExtractor::FeatureExtractor() {}
 
@@ -265,84 +311,41 @@ FeatureSample FeatureExtractor::extractFromSequence(const std::vector<cv::Mat>& 
         cumulative_dx_norm = (cumulative_dx / actor_height) / (float)active_count;
     }
 
-    // Direct loop helper for mean, std, max
-    auto vec_mean = [](const std::vector<float>& v) -> float {
-        if (v.empty()) return 0.0f;
-        float s = 0.0f;
-        for (float x : v) s += x;
-        return s / v.size();
-    };
+    float centroid_vertical_bounce = computeStdDev(active_center_ys);
 
-    auto vec_max = [](const std::vector<float>& v) -> float {
-        if (v.empty()) return 0.0f;
-        float m = v[0];
-        for (float x : v) if (x > m) m = x;
-        return m;
-    };
+    float mean_trans_speed = computeMean(frame_trans_speeds);
+    float max_trans_speed  = computeMax(frame_trans_speeds);
+    float p75_trans_speed  = computePercentile(frame_trans_speeds, 0.75f);
+    float p90_trans_speed  = computePercentile(frame_trans_speeds, 0.90f);
 
-    auto vec_std = [&](const std::vector<float>& v) -> float {
-        if (v.size() < 2) return 0.0f;
-        float m = vec_mean(v);
-        float sq = 0.0f;
-        for (float x : v) sq += (x - m) * (x - m);
-        return std::sqrt(sq / v.size());
-    };
+    float mean_body_p80    = computeMean(body_flow_p80s);
+    float max_body_p80     = computeMax(body_flow_p80s);
 
-    auto vec_zero_crossings = [&](const std::vector<float>& v) -> int {
-        if (v.size() < 3) return 0;
-        float m = vec_mean(v);
-        int count = 0;
-        for (size_t i = 1; i < v.size(); ++i) {
-            float p = v[i - 1] - m;
-            float c = v[i] - m;
-            if ((p <= 0.0f && c > 0.0f) || (p >= 0.0f && c < 0.0f)) count++;
-        }
-        return count;
-    };
-
-    // Helper to compute percentile of vector
-    auto vec_percentile = [](std::vector<float> v, float pct) -> float {
-        if (v.empty()) return 0.0f;
-        int idx = (int)(std::clamp(pct, 0.0f, 1.0f) * (v.size() - 1));
-        std::nth_element(v.begin(), v.begin() + idx, v.end());
-        return v[idx];
-    };
-
-    float centroid_vertical_bounce = vec_std(active_center_ys);
-
-    float mean_trans_speed = vec_mean(frame_trans_speeds);
-    float max_trans_speed  = vec_max(frame_trans_speeds);
-    float p75_trans_speed  = vec_percentile(frame_trans_speeds, 0.75f);
-    float p90_trans_speed  = vec_percentile(frame_trans_speeds, 0.90f);
-
-    float mean_body_p80    = vec_mean(body_flow_p80s);
-    float max_body_p80     = vec_max(body_flow_p80s);
-
-    float mean_leg_p80   = vec_mean(leg_flow_p80s);
-    float max_leg_p80    = vec_max(leg_flow_p80s);
-    float leg_energy_std = vec_std(leg_flow_mags);
-    float leg_mean_energy = vec_mean(leg_flow_mags);
+    float mean_leg_p80   = computeMean(leg_flow_p80s);
+    float max_leg_p80    = computeMax(leg_flow_p80s);
+    float leg_energy_std = computeStdDev(leg_flow_mags);
+    float leg_mean_energy = computeMean(leg_flow_mags);
     float leg_energy_cv  = leg_energy_std / (leg_mean_energy + 1e-4f);
-    int stride_crossings = vec_zero_crossings(leg_flow_mags);
+    int stride_crossings = computeZeroCrossings(leg_flow_mags);
 
     float sum_top_energy = 0.0f, sum_bot_energy = 0.0f;
     for (float x : upper_flow_mags) sum_top_energy += x;
     for (float x : leg_flow_mags)   sum_bot_energy += x;
     float vertical_bias  = sum_top_energy / (sum_bot_energy + 1e-4f);
 
-    float mean_upper_vy_mag  = vec_mean(upper_vy_mags);
-    float max_upper_vy_mag   = vec_max(upper_vy_mags);
-    int vy_zero_crossings    = vec_zero_crossings(upper_vy_means);
-    float mean_head_energy_ratio = vec_mean(head_energy_ratios);
+    float mean_upper_vy_mag  = computeMean(upper_vy_mags);
+    float max_upper_vy_mag   = computeMax(upper_vy_mags);
+    int vy_zero_crossings    = computeZeroCrossings(upper_vy_means);
+    float mean_head_energy_ratio = computeMean(head_energy_ratios);
 
-    float conv_std = vec_std(convergence_history);
-    float conv_max = vec_max(convergence_history);
+    float conv_std = computeStdDev(convergence_history);
+    float conv_max = computeMax(convergence_history);
     float opposed_motion_ratio = upper_motion_frames > 0 ? ((float)opposed_motion_count / upper_motion_frames) : 0.0f;
-    float punch_peak_max = vec_max(punch_peaks);
-    float avg_asymmetry = vec_mean(asymmetry_history);
-    float box_width_std = vec_std(box_widths);
+    float punch_peak_max = computeMax(punch_peaks);
+    float avg_asymmetry = computeMean(asymmetry_history);
+    float box_width_std = computeStdDev(box_widths);
 
-    float max_aspect_ratio = vec_max(aspect_ratios);
+    float max_aspect_ratio = computeMax(aspect_ratios);
 
     // Build 27-element feature vector
     sample.descriptors.push_back(total_displacement);                       // 1. Total net sequence horizontal displacement

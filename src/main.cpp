@@ -1,3 +1,7 @@
+/**
+AUTHOR: ROSSETTO LUCA
+*/
+
 #include "DatasetLoader.hpp"
 #include "FeatureExtractor.hpp"
 #include "YoloFeatureExtractor.hpp"
@@ -31,11 +35,12 @@ struct PipelineResults {
     std::vector<float> per_class_miou;
 };
 
+// Execute complete pipeline for either CV or Deep Learning YOLO mode
 static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
                                   bool is_yolo_mode,
                                   const std::string& output_dir) {
     PipelineResults results;
-    results.mode_name = is_yolo_mode ? "DEEP LEARNING (YOLOv8 Pose)" : "CLASSICAL COMPUTER VISION (KNN Subtractor)";
+    results.mode_name = is_yolo_mode ? "DEEP LEARNING" : "CLASSICAL COMPUTER VISION";
 
     if (!fs::exists(output_dir)) {
         fs::create_directories(output_dir);
@@ -45,18 +50,18 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
     std::cout << " PIPELINE: " << results.mode_name << "\n";
     std::cout << "===================================================================\n";
 
-    std::cout << "\n================ MEMBER 1: LOCALIZATION & TRACKING ================\n";
+    std::cout << "\n================ LOCALIZATION & TRACKING ================\n";
     
     std::unique_ptr<YoloTracker> yolo_tracker = nullptr;
     if (is_yolo_mode) {
-        std::cout << "[INFO] Mode: DEEP LEARNING FALLBACK (YOLOv8 Pose)\n";
+        std::cout << "Mode: DEEP LEARNING FALLBACK (YOLOv8 Pose)\n";
         std::string model_path = "../models/yolov8n-pose.onnx";
         yolo_tracker = std::make_unique<YoloTracker>(model_path);
     } else {
-        std::cout << "[INFO] Mode: CLASSICAL COMPUTER VISION (KNN Subtractor + Morph)\n";
+        std::cout << "Mode: CLASSICAL COMPUTER VISION (KNN Subtractor + Morph)\n";
     }
 
-    std::cout << "[INFO] Processing " << raw_dataset.size() << " sequences...\n";
+    std::cout << "Processing " << raw_dataset.size() << " sequences...\n";
 
     std::vector<FeatureSample> feature_dataset;
     std::vector<float> iou_scores;
@@ -147,12 +152,12 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
     }
     std::cout << "===================================================================\n\n";
 
-    std::cout << "================ MEMBER 2: CLASSIFICATION & EVALUATION ================\n";
+    std::cout << "================ CLASSIFICATION & EVALUATION ================\n";
     ActionClassifier classifier;
     results.cv_accuracy = classifier.evaluate(feature_dataset, 0.75f);
 
     std::string model_path = output_dir + "/svm_action_model.xml";
-    std::cout << "[INFO] Training final SVM model on complete dataset..." << std::endl;
+    std::cout << "Training final SVM model on complete dataset..." << std::endl;
     classifier.trainAndSave(feature_dataset, model_path);
 
     // Save bounding box visual outputs for all 72 sequences
@@ -161,7 +166,7 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
         fs::create_directories(viz_dir);
     }
 
-    std::cout << "\n[INFO] Saving bounding box visualization images to: " << viz_dir << std::endl;
+    std::cout << "\nSaving bounding box visualization images to: " << viz_dir << std::endl;
     for (size_t s = 0; s < raw_dataset.size(); ++s) {
         const auto& seq = raw_dataset[s];
         int pred_class = classifier.predict(feature_dataset[s].descriptors);
@@ -189,7 +194,7 @@ static PipelineResults runPipeline(const std::vector<SequenceData>& raw_dataset,
         std::string out_path = viz_dir + "/" + seq.sequence_name + ".png";
         cv::imwrite(out_path, viz_img);
     }
-    std::cout << "[INFO] Saved 72 visualization images into " << viz_dir << std::endl;
+    std::cout << "Saved 72 visualization images into " << viz_dir << std::endl;
     std::cout << "=======================================================================\n";
 
     return results;
@@ -208,7 +213,7 @@ int main(int argc, char** argv) {
             use_yolo = true;
         } else if (arg == "--use-all") {
             use_all = true;
-        } else if (arg.rfind("--", 0) != 0) { // If it doesn't start with "--", assume it's the dataset path
+        } else if (arg.rfind("--", 0) != 0) { // If it doesn't start with "--", assume dataset path
             dataset_path = arg;
         }
     }
@@ -217,7 +222,7 @@ int main(int argc, char** argv) {
         fs::create_directories(output_dir);
     }
 
-    std::cout << "[INFO] Loading dataset from: " << dataset_path << std::endl;
+    std::cout << "Loading dataset from: " << dataset_path << std::endl;
     std::vector<SequenceData> raw_dataset = DatasetLoader::loadDataset(dataset_path);
 
     if (raw_dataset.empty()) {
@@ -228,7 +233,7 @@ int main(int argc, char** argv) {
     if (use_all) {
         // Run both Classical CV and Deep Learning YOLO pipelines and compare them
         std::cout << "\n=======================================================================\n";
-        std::cout << "               RUNNING COMPLETE COMPARISON (--use-all)                 \n";
+        std::cout << "               RUNNING COMPLETE COMPARISON                 \n";
         std::cout << "=======================================================================\n";
 
         PipelineResults cv_res = runPipeline(raw_dataset, false, output_dir + "/cv");

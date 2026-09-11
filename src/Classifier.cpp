@@ -1,3 +1,7 @@
+/**
+AUTHOR: CORTESE ALESSANDRO
+*/
+
 #include "Classifier.hpp"
 #include <iostream>
 #include <iomanip>
@@ -183,8 +187,8 @@ void ActionClassifier::trainAndSave(const std::vector<FeatureSample>& dataset, c
     computeScalingParams(all_X);
     applyScaling(all_X);
 
-    cv::ml::ParamGrid c_grid(0.1, 100, 10);
-    cv::ml::ParamGrid gamma_grid(0.001, 1.0, 5);
+    cv::ml::ParamGrid c_grid(0.1, 500, 2);
+    cv::ml::ParamGrid gamma_grid(0.0001, 2.0, 2);
 
     svm_model->trainAuto(cv::ml::TrainData::create(all_X, cv::ml::ROW_SAMPLE, all_y),
                          10, c_grid, gamma_grid,

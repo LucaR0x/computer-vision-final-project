@@ -1,7 +1,6 @@
 #ifndef YOLO_TRACKER_HPP
 #define YOLO_TRACKER_HPP
 
-
 #include <opencv2/imgproc.hpp>
 #include <opencv2/geometry.hpp>
 #include <opencv2/opencv.hpp>
@@ -23,9 +22,10 @@ private:
 public:
     YoloTracker(const std::string& model_path);
     
-    // Ripristina lo stato del tracker per una nuova sequenza
+    // Reset tracker state for a new sequence
     void reset();
     
+    // Process frame using YOLO ONNX DNN inference
     cv::Rect processFrame(const cv::Mat& frame, cv::Mat& out_mask);
 };
 

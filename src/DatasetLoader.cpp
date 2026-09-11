@@ -1,3 +1,7 @@
+/**
+AUTHOR: ROSSETTO LUCA
+*/
+
 #include "DatasetLoader.hpp"
 #include <filesystem>
 #include <fstream>
@@ -15,7 +19,7 @@ bool DatasetLoader::parseGroundTruth(const std::string& txt_path, int img_w, int
     }
 
     float xc, yc, w, h;
-    // Reading <class_id> <x_center> <y_center> <width> <height>
+    // Read format: <class_id> <x_center> <y_center> <width> <height>
     if (in_file >> label >> xc >> yc >> w >> h) {
         float abs_xc = (xc <= 1.0f) ? (xc * img_w) : xc;
         float abs_yc = (yc <= 1.0f) ? (yc * img_h) : yc;
@@ -97,9 +101,6 @@ std::vector<SequenceData> DatasetLoader::loadDataset(const std::string& dataset_
             int img_h = seq.frames[0].rows;
             if (parseGroundTruth(gt_file, img_w, img_h, seq.class_label, seq.median_bbox)) {
                 dataset.push_back(seq);
-                std::cout << "[INFO] Loaded " << seq.sequence_name 
-                          << " | Frames: " << seq.frames.size() 
-                          << " | Label: " << seq.class_label << std::endl;
             }
         }
     }

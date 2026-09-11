@@ -6,7 +6,7 @@
 #include <opencv2/geometry.hpp>
 #include <vector>
 
-// Member 1: Tracker class for actor localization
+// Member 1: Classical CV Tracker class for actor localization
 class Tracker {
 private:
     cv::Ptr<cv::BackgroundSubtractor> bg_subtractor;

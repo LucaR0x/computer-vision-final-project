@@ -19,7 +19,7 @@ public:
     static std::vector<SequenceData> loadDataset(const std::string& dataset_path);
 
 private:
-    // Parse ground truth txt annotation file
+    // Parse ground truth text annotation file
     static bool parseGroundTruth(const std::string& txt_path, int img_w, int img_h,
                                  int& label, cv::Rect& bbox);
 };

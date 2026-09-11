@@ -2,16 +2,15 @@
 #define FEATURE_EXTRACTOR_HPP
 
 #include <opencv2/opencv.hpp>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/video/tracking.hpp>
 #include <vector>
 #include <string>
+#include "DatasetLoader.hpp"
 #include "tracker.hpp"
 
-// Sample containing label, sequence name and 22-dimensional feature vector
+// Structure to store feature vector for an action sequence
 struct FeatureSample {
-    int label;
     std::string sequence_name;
+    int label;
     std::vector<float> descriptors;
 };
 
@@ -19,11 +18,11 @@ class FeatureExtractor {
 public:
     FeatureExtractor();
 
-    // Extract spatial-temporal movement features from a 40-frame sequence
+    // Extract feature vector from video sequence using classical background subtractor tracking
     FeatureSample extractFromSequence(const std::vector<cv::Mat>& frames, 
-                                     int label, 
-                                     const std::string& name,
-                                     const cv::Rect& roi = cv::Rect());
+                                       int label, 
+                                       const std::string& sequence_name,
+                                       const cv::Rect& ground_truth_roi);
 };
 
 #endif // FEATURE_EXTRACTOR_HPP

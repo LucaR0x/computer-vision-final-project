@@ -1,5 +1,12 @@
+/**
+AUTHOR: ROSSETTO LUCA
+*/
+
 #include "tracker.hpp"
+#include <opencv2/opencv.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/geometry.hpp>
+#include <opencv2/video.hpp>
 #include <numeric>
 #include <algorithm>
 #include <cmath>
@@ -58,7 +65,7 @@ cv::Rect Tracker::processFrame(const cv::Mat& frame, cv::Mat& out_mask) {
         cv::GaussianBlur(diff_img, diff_img, cv::Size(5, 5), 1.0);
         cv::threshold(diff_img, fg_mask, 18, 255, cv::THRESH_BINARY);
 
-        // Fallback for low-contrast frames
+        // Threshold fallback for low-contrast frames
         if (cv::countNonZero(fg_mask) < 35) {
             cv::threshold(diff_img, fg_mask, 10, 255, cv::THRESH_BINARY);
         }
@@ -69,10 +76,10 @@ cv::Rect Tracker::processFrame(const cv::Mat& frame, cv::Mat& out_mask) {
         cv::threshold(fg_knn, fg_mask, 150, 255, cv::THRESH_BINARY);
     }
 
-    // Clean image border noise
+    // Zero out noise along image border
     cv::rectangle(fg_mask, cv::Rect(0, 0, img_w, img_h), cv::Scalar(0), 6);
 
-    // Morphological closing using vertical kernel to connect head, torso and legs
+    // Vertical morphological closing kernel to join body parts
     cv::Mat close_kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(11, 25));
     cv::morphologyEx(fg_mask, out_mask, cv::MORPH_CLOSE, close_kernel);
     cv::dilate(out_mask, out_mask, cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 9)));
@@ -111,7 +118,7 @@ cv::Rect Tracker::processFrame(const cv::Mat& frame, cv::Mat& out_mask) {
         }
     }
 
-    // Aspect ratio human physical proportion check
+    // Adjust vertical aspect ratio for human physical proportions
     if (final_box.area() > 0) {
         float aspect_ratio = (float)final_box.height / ((float)final_box.width + 1e-4f);
         if (aspect_ratio < 1.4f) {

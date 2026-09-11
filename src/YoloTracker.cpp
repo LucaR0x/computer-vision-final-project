@@ -1,3 +1,7 @@
+/**
+AUTHOR: ROSSETTO LUCA
+*/
+
 #include "YoloTracker.hpp"
 #include <iostream>
 
@@ -37,12 +41,11 @@ cv::Rect YoloTracker::processFrame(const cv::Mat& frame, cv::Mat& out_mask) {
 
     cv::Mat out = outputs[0];
     
-    // Gestione sicura delle dimensioni indipendentemente dalla versione di OpenCV
     int rows = (out.dims == 3) ? out.size[1] : out.size[0];
     int cols = (out.dims == 3) ? out.size[2] : out.size[1];
 
     cv::Mat predictions(rows, cols, CV_32F, out.ptr<float>());
-    predictions = predictions.clone().t(); // Il clone libera la memoria dal tensore originale
+    predictions = predictions.clone().t();
 
     std::vector<cv::Rect> boxes;
     std::vector<float> scores;
@@ -104,18 +107,17 @@ cv::Rect YoloTracker::processFrame(const cv::Mat& frame, cv::Mat& out_mask) {
                 int py = static_cast<int>(pt.y);
                 kpts_int.push_back(cv::Point(px, py));
                 
-                // Troviamo le estremità assolute dei keypoint
                 if (px < min_x) min_x = px;
                 if (py < min_y) min_y = py;
                 if (px > max_x) max_x = px;
                 if (py > max_y) max_y = py;
             }
             
-            // 1. ESPANSIONE KEYPOINTS: Forza il bounding box a includere sempre polsi e caviglie
+            // Expand bounding box to enclose all keypoints
             cv::Rect kpt_rect(min_x, min_y, max_x - min_x, max_y - min_y);
-            best_bbox |= kpt_rect; // Unione matematica dei due rettangoli
+            best_bbox |= kpt_rect;
 
-            // Creazione maschera Convex Hull
+            // Generate convex hull mask
             std::vector<cv::Point> hull;
             cv::convexHull(kpts_int, hull);
             cv::fillConvexPoly(out_mask, hull, cv::Scalar(255));
@@ -125,23 +127,20 @@ cv::Rect YoloTracker::processFrame(const cv::Mat& frame, cv::Mat& out_mask) {
             cv::rectangle(out_mask, best_bbox, cv::Scalar(255), cv::FILLED);
         }
 
-        // 2. DYNAMIC PADDING
+        // Apply dynamic padding
         int pad_x = static_cast<int>(best_bbox.width * 0.06);
         int pad_y = static_cast<int>(best_bbox.height * 0.02);
         best_bbox.x = std::max(0, best_bbox.x - pad_x);
         best_bbox.y = std::max(0, best_bbox.y - pad_y);
         best_bbox.width = std::min(img_w - best_bbox.x, best_bbox.width + 2 * pad_x);
         best_bbox.height = std::min(img_h - best_bbox.y, best_bbox.height + 2 * pad_y);
-        
-        // Assicuriamoci che non esca dai bordi dopo il padding
         best_bbox &= cv::Rect(0, 0, img_w, img_h);
 
-        // 3. EMA SMOOTHING (Anti-Jitter)
+        // Exponential moving average smoothing against jitter
         if (first_frame) {
             prev_bbox = best_bbox;
             first_frame = false;
         } else {
-            // Un alpha alto (0.80) mantiene il box fluido tra i frame consecutivi
             float alpha = 0.80f; 
             int new_x = static_cast<int>(std::round(best_bbox.x * alpha + prev_bbox.x * (1.0f - alpha)));
             int new_y = static_cast<int>(std::round(best_bbox.y * alpha + prev_bbox.y * (1.0f - alpha)));
@@ -152,7 +151,7 @@ cv::Rect YoloTracker::processFrame(const cv::Mat& frame, cv::Mat& out_mask) {
             prev_bbox = best_bbox;
         }
     } else {
-        // Fallback: se YOLO non vede nulla per colpa del motion blur, usiamo la posizione precedente
+        // Fallback to previous bounding box if detection missed
         best_bbox = prev_bbox;
     }
     return best_bbox;
