@@ -206,12 +206,12 @@ void ActionClassifier::trainAndSave(const std::vector<FeatureSample>& dataset, c
     fs << "stds" << trained_stds;
     fs.release();
 
-    std::cout << "[INFO] Final SVM Model and Scaling Params saved to: " << model_output_path << std::endl;
+    std::cout << "Final SVM Model and Scaling Params saved to: " << model_output_path << std::endl;
 }
 
 int ActionClassifier::predict(const std::vector<float>& raw_feature_vector) const {
     if (trained_means.empty() || trained_stds.empty()) {
-        std::cerr << "[ERROR] Scaler params not initialized!" << std::endl;
+        std::cerr << "Scaler params not initialized!" << std::endl;
         return -1;
     }
 
@@ -229,7 +229,7 @@ bool ActionClassifier::loadModel(const std::string& model_input_path) {
     std::string scale_path = model_input_path + ".scale.yaml";
     cv::FileStorage fs(scale_path, cv::FileStorage::READ);
     if (!fs.isOpened()) {
-        std::cerr << "[WARNING] Scaling file missing: " << scale_path << std::endl;
+        std::cerr << "Scaling file missing: " << scale_path << std::endl;
         return !svm_model.empty();
     }
 
